@@ -10,6 +10,7 @@ import SettingsButton from './SettingsButton'
 import { runtime } from '@deltachat-desktop/runtime-interface'
 import CoreSettingsSwitch from './CoreSettingsSwitch'
 import DesktopSettingsSwitch from './DesktopSettingsSwitch'
+import PostQuantumEncryptionSettings from './PostQuantumEncryption'
 import { AutostartState } from '@deltachat-desktop/shared/shared-types'
 import ProxyConfiguration from '../dialogs/ProxyConfiguration'
 import { selectedAccountId } from '../../ScreenController'
@@ -90,6 +91,10 @@ export default function Advanced({ onClose }: Props) {
         description={tx('pref_multidevice_explain')}
         beforeChange={confirmDisableMultiDevice}
       />
+
+      <SettingsSeparator />
+      <SettingsHeading>{tx('pref_encryption')}</SettingsHeading>
+      <PostQuantumEncryptionSettings />
 
       <SettingsSeparator />
 

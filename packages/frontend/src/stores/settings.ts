@@ -29,6 +29,7 @@ export interface SettingsStoreState {
       proxy_enabled: Proxy
       proxy_url: string
       team_profile: '0' | '1'
+      key_gen_mode: '0' | '1'
     }[P]
   }
   desktopSettings: DesktopSettingsType
@@ -50,6 +51,7 @@ const settingsKeys = [
   'proxy_enabled',
   'proxy_url',
   'team_profile',
+  'key_gen_mode',
 ] as const
 
 export const enum WhoCanCallMe {

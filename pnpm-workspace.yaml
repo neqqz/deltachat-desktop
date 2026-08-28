@@ -30,6 +30,18 @@ allowBuilds:
 overrides:
   stylus: 'npm:empty-npm-package@1.0.0'
   'esbuild-plugin-inline-worker>esbuild': ^0.25.0
+  # Local dev override: use the @deltachat/jsonrpc-client built from your own
+  # core fork instead of the pinned npm release below, so the frontend's TS
+  # types (and the RawClient methods actually called at runtime, e.g.
+  # getSelfEncryptionKind/rotateKeypairNow) match your fork's RPC surface.
+  # Note: the Tauri app now lives in the separate deltachat-tauri repo, which
+  # uses deltachat-desktop as its `upstream/` submodule and has its own
+  # pnpm-workspace.yaml — add the matching override there too (that's the one
+  # that actually matters for Tauri builds; this one covers Electron/this
+  # workspace's own tooling). Path is relative to this file; adjust it to
+  # wherever you checked out your core fork. Remove this line to go back to
+  # the published npm release.
+  '@deltachat/jsonrpc-client': 'link:../core/deltachat-jsonrpc/typescript'
 
 catalog:
   # deltachat specific
