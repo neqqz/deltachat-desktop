@@ -7,7 +7,8 @@ import {
   RC_Config,
   Theme,
 } from '@deltachat-desktop/shared/shared-types'
-import SettingsStoreInstance, {
+import {
+  DesktopSettingsStoreInstance,
   SettingsStoreState,
 } from '../../stores/settings'
 import { getLogger } from '@deltachat-desktop/shared/logger'
@@ -60,7 +61,7 @@ export default function Appearance({
 
   const setTheme = async (theme: string) => {
     if (await setThemeFunction(theme)) {
-      SettingsStoreInstance.effect.setDesktopSetting('activeTheme', theme)
+      DesktopSettingsStoreInstance.effect.set('activeTheme', theme)
       await ThemeManager.refresh()
     }
   }
@@ -116,14 +117,11 @@ export default function Appearance({
           desktopSettings={desktopSettings}
           onChange={(val: string) => {
             val.startsWith('#')
-              ? SettingsStoreInstance.effect.setDesktopSetting(
+              ? DesktopSettingsStoreInstance.effect.set(
                   'chatViewBgImg',
                   `color: ${val}`
                 )
-              : SettingsStoreInstance.effect.setDesktopSetting(
-                  'chatViewBgImg',
-                  val
-                )
+              : DesktopSettingsStoreInstance.effect.set('chatViewBgImg', val)
           }}
         />
       </DialogContent>
@@ -135,12 +133,15 @@ export default function Appearance({
         label={tx('pref_use_system_ui_font')}
         callback={() => ThemeManager.refresh()}
       />
-      <DesktopSettingsSwitch
-        settingsKey='hideMenuBar'
-        label={tx('pref_hide_menu_bar')}
-        disabled={isBrowser || isTauri || isMac}
-        disabledValue={false}
-      />
+      {/* on macOS the menu bar can not be hidden */}
+      {!isMac && (
+        <DesktopSettingsSwitch
+          settingsKey='hideMenuBar'
+          label={tx('pref_hide_menu_bar')}
+          disabled={isBrowser || isTauri}
+          disabledValue={false}
+        />
+      )}
     </>
   )
 }
@@ -228,7 +229,7 @@ function BackgroundSelector({
         if (runtime.getRuntimeInfo().target !== 'browser') {
           setLastPath(url)
         }
-        SettingsStoreInstance.effect.setDesktopSetting(
+        DesktopSettingsStoreInstance.effect.set(
           'chatViewBgImg',
           await runtime.saveBackgroundImage(url, false)
         )
@@ -238,7 +239,7 @@ function BackgroundSelector({
         }
         break
       case SetBackgroundAction.presetImage:
-        SettingsStoreInstance.effect.setDesktopSetting(
+        DesktopSettingsStoreInstance.effect.set(
           'chatViewBgImg',
           await runtime.saveBackgroundImage(
             (ev.target as any).dataset.url,
