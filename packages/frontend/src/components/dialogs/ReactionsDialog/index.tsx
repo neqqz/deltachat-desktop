@@ -1,10 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import classNames from 'classnames'
 
 import Dialog, { DialogBody, DialogContent, DialogHeader } from '../../Dialog'
 import useTranslationFunction from '../../../hooks/useTranslationFunction'
 import { selectedAccountId } from '../../../ScreenController'
-import { BackendRemote } from '../../../backend-com'
+import { BackendRemote, onDCEvent } from '../../../backend-com'
 import { AvatarFromContact } from '../../Avatar'
 import ContactName from '../../ContactName'
 
@@ -18,9 +24,17 @@ import {
   RovingTabindexProvider,
   useRovingTabindex,
 } from '../../../contexts/RovingTabindex'
+import { useRpcFetch } from '../../../hooks/useFetch'
+import { default as asyncThrottle } from '@jcoreio/async-throttle'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { BasicMessageInfo } from '../MessageDetail/BasicMessageInfo'
+import { unknownErrorToString } from '@deltachat-desktop/shared/unknownErrorToString'
+import useAlertDialog from '../../../hooks/dialog/useAlertDialog'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import ReactionsBar from '../../ReactionsBar'
 
 export type Props = {
-  reactions: T.Reactions
+  message: Pick<T.Message, 'id' | 'reactions'>
   /**
    * Whether it is known who reacted with what. This is not the case for
    * subscribers of a channel, they only know the accumulated reactions.
@@ -34,49 +48,186 @@ type ContactWithReaction = T.Contact & {
 }
 
 export default function ReactionsDialog({
-  reactions,
+  message: originalMessage,
   showContacts,
   onClose,
 }: Props & DialogProps) {
   const tx = useTranslationFunction()
 
+  /**
+   * The `originalMessage` prop will not update as reactions change,
+   * so we have to update it ourselves.
+   * Similar to {@linkcode BasicMessageInfo}.
+   */
+  const [originalIsOutdated, setOriginalIsOutdated] = useState(false)
+  const freshMessageFetch = useRpcFetch(
+    useMemo(
+      () =>
+        asyncThrottle(
+          BackendRemote.rpc.getMessage.bind(BackendRemote.rpc),
+          250
+        ),
+      []
+    ),
+    originalIsOutdated ? [selectedAccountId(), originalMessage.id] : null
+  )
+  const refresh = useEffectEvent(() => freshMessageFetch?.refresh())
+  useEffect(() => {
+    return onDCEvent(selectedAccountId(), 'ReactionsChanged', ({ msgId }) => {
+      if (msgId !== originalMessage.id) {
+        return
+      }
+
+      setOriginalIsOutdated(true)
+      refresh()
+    })
+  }, [originalMessage.id])
+  const message = freshMessageFetch?.lingeringResult?.ok
+    ? freshMessageFetch.lingeringResult.value
+    : originalMessage
+
+  const totalReactions =
+    message.reactions == null
+      ? 0
+      : message.reactions.reactions
+          .values()
+          .map(r => r.count)
+          .reduce((a, v) => a + v)
+
   return (
     <Dialog width={400} onClose={onClose}>
-      <DialogHeader title={tx('reactions')} onClose={onClose} />
+      <DialogHeader
+        title={
+          <span aria-live='polite'>
+            {tx('n_reactions', totalReactions.toLocaleString(), {
+              quantity: totalReactions,
+            })}
+          </span>
+        }
+        onClose={onClose}
+      />
       <DialogBody>
-        <DialogContent>
-          {showContacts ? (
-            <ReactionsDialogList
-              reactionsByContact={reactions.reactionsByContact}
-              onClose={onClose}
-            />
-          ) : (
-            <AccumulatedReactionsList reactions={reactions.reactions} />
-          )}
-        </DialogContent>
+        <div
+          aria-live='polite'
+          aria-relevant='all'
+          style={{ display: 'contents' }}
+        >
+          <DialogContent>
+            {message.reactions == null ||
+            message.reactions.reactions.length === 0 ? (
+              <></>
+            ) : (
+              <>
+                <AccumulatedReactionsList
+                  message={
+                    message as typeof message & {
+                      reactions: typeof message.reactions
+                    }
+                  }
+                />
+                {showContacts && (
+                  <ReactionsDialogList
+                    reactionsByContact={message.reactions.reactionsByContact}
+                    onClose={onClose}
+                  />
+                )}
+              </>
+            )}
+          </DialogContent>
+        </div>
       </DialogBody>
     </Dialog>
   )
 }
 
+/**
+ * This is very similar to {@linkcode ReactionsBar}.
+ */
 function AccumulatedReactionsList({
-  reactions,
+  message,
 }: {
-  reactions: T.Reactions['reactions']
+  message: Pick<T.Message, 'id' | 'reactions'> & {
+    reactions: NonNullable<T.Message['reactions']>
+  }
 }) {
+  const ref = useRef<HTMLUListElement>(null)
   const tx = useTranslationFunction()
+  const openAlertDialog = useAlertDialog()
+
+  const toggleReaction = async (emoji: string) => {
+    try {
+      await BackendRemote.rpc.sendReaction(
+        selectedAccountId(),
+        message.id,
+        emoji === message.reactions.reactions.find(v => v.isFromSelf)?.emoji
+          ? []
+          : [emoji]
+      )
+    } catch (error) {
+      openAlertDialog({
+        message: tx(
+          'error_x',
+          'failed to send reaction: ' + unknownErrorToString(error)
+        ),
+      })
+    }
+  }
 
   return (
-    <ul className={styles.reactionsDialogList}>
-      {reactions.map(({ emoji, count }) => (
-        <li key={emoji} className={styles.accumulatedReactionsListItem}>
-          <div className={styles.reactionsDialogEmoji}>{emoji}</div>
-          <div className={styles.accumulatedReactionsCount}>
-            {tx('n_reactions', [String(count)], { quantity: count })}
-          </div>
-        </li>
-      ))}
+    <ul
+      ref={ref}
+      className={styles.accumulatedReactionsList}
+      role='menubar'
+      aria-label={tx('react')}
+      aria-orientation='horizontal'
+    >
+      <RovingTabindexProvider wrapperElementRef={ref} direction='horizontal'>
+        {message.reactions.reactions.map(({ emoji, count, isFromSelf }) => (
+          <li role='presentation' key={emoji}>
+            <ReactionButton
+              key={emoji}
+              emoji={emoji}
+              count={count}
+              isChecked={isFromSelf}
+              onClick={() => toggleReaction(emoji)}
+            />
+          </li>
+        ))}
+      </RovingTabindexProvider>
     </ul>
+  )
+}
+
+function ReactionButton(props: {
+  emoji: string
+  count: number
+  isChecked: boolean
+  onClick: () => void
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const rovingTabindex = useRovingTabindex(ref)
+
+  return (
+    <button
+      ref={ref}
+      type='button'
+      role='menuitemradio'
+      aria-checked={props.isChecked}
+      onClick={props.onClick}
+      className={classNames(
+        rovingTabindex.className,
+        styles.accumulatedReactionsButton,
+        {
+          [styles.isFromSelf]: props.isChecked,
+        }
+      )}
+      tabIndex={rovingTabindex.tabIndex}
+      onKeyDown={rovingTabindex.onKeydown}
+      onFocus={rovingTabindex.setAsActiveElement}
+    >
+      <span className={styles.accumulatedReactionsEmoji}>{props.emoji}</span>{' '}
+      <span className={styles.accumulatedReactionsCount}>{props.count}</span>
+    </button>
   )
 }
 
