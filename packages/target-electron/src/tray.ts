@@ -49,10 +49,21 @@ function mainWindowIsVisible() {
   if (!mainWindow.window) {
     throw new Error('window does not exist, this should never happen')
   }
-  if (process.platform === 'darwin' || process.platform === 'win32') {
+  if (process.platform === 'win32') {
     return mainWindow.window.isVisible()
   }
+  // A window that is visible but sits behind the windows of another app (or
+  // on another Space) is not reachable for the user, so treat it as not
+  // visible and offer to activate it.
   return mainWindow.window.isVisible() && mainWindow.window.isFocused()
+}
+
+/** Whether hiding the window would actually do something. */
+function mainWindowCanBeHidden() {
+  if (!mainWindow.window) {
+    throw new Error('window does not exist, this should never happen')
+  }
+  return mainWindow.window.isVisible() && !mainWindow.window.isMinimized()
 }
 
 export function hideDeltaChat() {
@@ -60,14 +71,24 @@ export function hideDeltaChat() {
     throw new Error('window does not exist, this should never happen')
   }
   mainWindow.window.hide()
-  if (process.platform === 'linux') tray?.setContextMenu(getTrayMenu() as Menu)
+  if (process.platform === 'linux') refreshTrayContextMenu()
 }
 
 export function showDeltaChat() {
   if (!mainWindow.window) {
     throw new Error('window does not exist, this should never happen')
   }
+  if (mainWindow.window.isMinimized()) {
+    mainWindow.window.restore()
+  }
   mainWindow.window.show()
+  mainWindow.window.focus()
+  if (process.platform === 'darwin') {
+    // `window.show()` alone does not bring the app in front of the app that
+    // is currently active.
+    app.focus({ steal: true })
+  }
+  if (process.platform === 'linux') refreshTrayContextMenu()
 }
 
 function hideOrShowDeltaChat() {
@@ -145,7 +166,7 @@ function getTrayMenu() {
         id: 'reduce_window',
         label: tx('global_menu_minimize_to_tray'),
         type: 'normal',
-        enabled: mainWindowIsVisible(),
+        enabled: mainWindowCanBeHidden(),
         click() {
           hideDeltaChat()
         },

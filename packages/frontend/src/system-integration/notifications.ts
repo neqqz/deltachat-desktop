@@ -1,4 +1,3 @@
-import { appName } from '@deltachat-desktop/shared/constants'
 import { getLogger } from '@deltachat-desktop/shared/logger'
 import { NOTIFICATION_TYPE } from '@deltachat-desktop/shared/constants'
 import { BackendRemote } from '../backend-com'
@@ -13,6 +12,42 @@ import AccountNotificationStoreInstance from '../stores/accountNotifications'
 import { C, type T } from '@deltachat/jsonrpc-client'
 
 const log = getLogger('renderer/notifications')
+
+/**
+ * Notification icons are decoded by the main process, so we prevent images
+ * with absurd dimensions from consuming too much memory - a few kilobytes
+ * of png are enough, because decoding allocates `width * height * 4` bytes.
+ *
+ * Use the same limit core applies to webxdc icons in `get_webxdc_blob`.
+ */
+const MAX_ICON_SIZE = 4096
+
+/**
+ * The renderer reads the dimensions from the image header without
+ * decoding it, so this only costs a load and covers every known format
+ */
+async function checkedIcon(icon: string | null): Promise<string | null> {
+  if (!icon) {
+    return null
+  }
+  const [width, height] = await new Promise<[number, number]>(resolve => {
+    const image = new Image()
+    // on error the dimensions stay 0, which is rejected below
+    const done = () => resolve([image.naturalWidth, image.naturalHeight])
+    image.onload = done
+    image.onerror = done
+    image.src = icon.startsWith('data:') ? icon : runtime.transformBlobURL(icon)
+  })
+  if (width < 1 || height < 1) {
+    log.warn('not using a notification icon that could not be read')
+    return null
+  }
+  if (width > MAX_ICON_SIZE || height > MAX_ICON_SIZE) {
+    log.warn(`not using a notification icon of ${width}x${height}`)
+    return null
+  }
+  return icon
+}
 
 /**
  * Notification handling:
@@ -167,7 +202,6 @@ async function showNotification(
 
   if (!DesktopSettingsStoreInstance.state?.showNotificationContent) {
     runtime.showNotification({
-      title: appName,
       body: tx('notify_new_message'),
       icon: null,
       chatId,
@@ -213,14 +247,23 @@ async function showNotification(
           summaryPrefix = `${webxdcInfo.name}`
           if (webxdcInfo.icon) {
             const iconName = webxdcInfo.icon
-            const iconBlob = await BackendRemote.rpc.getWebxdcBlob(
-              accountId,
-              message.id,
-              iconName
-            )
-            // needed for valid dataUrl
-            const imageExtension = iconName.split('.').pop()
-            icon = `data:image/${imageExtension};base64,${iconBlob}`
+            try {
+              const iconBlob = await BackendRemote.rpc.getWebxdcBlob(
+                accountId,
+                message.id,
+                iconName
+              )
+              // needed for valid dataUrl
+              const imageExtension = iconName.split('.').pop()
+              icon = `data:image/${imageExtension};base64,${iconBlob}`
+            } catch (error) {
+              // core refuses to load icons with unexpected dimensions or
+              // format; show the notification without an icon then
+              log.warn(
+                `could not load webxdc icon of message ${message.id}`,
+                error
+              )
+            }
           }
         } else {
           throw new Error(`no webxdcInfo in message with id ${message.id}`)
@@ -242,7 +285,7 @@ async function showNotification(
       runtime.showNotification({
         title: chatName,
         body: summaryPrefix ? `${summaryPrefix}: ${summaryText}` : summaryText,
-        icon,
+        icon: await checkedIcon(icon),
         iconIsAvatar,
         chatId,
         messageId,
@@ -263,7 +306,6 @@ async function showGroupedNotification(
 
   if (!DesktopSettingsStoreInstance.state?.showNotificationContent) {
     runtime.showNotification({
-      title: appName,
       body: tx('new_messages'),
       icon: null,
       chatId: 0,
@@ -292,7 +334,7 @@ async function showGroupedNotification(
           body: tx('chat_n_new_messages', String(msgCount), {
             quantity: msgCount,
           }),
-          icon: chatProfileImage || null,
+          icon: await checkedIcon(chatProfileImage || null),
           chatId: chatIds[0],
           messageId: 0, // just select chat on click, no specific message
           accountId,

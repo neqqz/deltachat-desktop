@@ -1,6 +1,5 @@
 import React, { createRef } from 'react'
 import { Component } from 'react'
-import { DcEventType } from '@deltachat/jsonrpc-client'
 import { throttle } from '@deltachat-desktop/shared/util'
 
 import MainScreen from './components/screens/MainScreen/MainScreen'
@@ -25,13 +24,9 @@ import { InstantOnboardingProvider } from './contexts/InstantOnboardingContext'
 import { MediaPlayerMutexProvider } from './contexts/MediaPlayerMutexContext'
 import { SmallScreenModeMacOSTitleBar } from './components/SmallScreenModeMacOSTitleBar'
 import { NextVoiceMessagePlayerProvider } from './contexts/NextVoiceMessagePlayerContext'
+import { ToastContextProvider } from './contexts/ToastContext'
 
 const log = getLogger('renderer/ScreenController')
-
-export interface userFeedback {
-  type: 'error' | 'success'
-  text: string
-}
 
 export enum Screens {
   Welcome = 'welcome',
@@ -50,7 +45,6 @@ function isSmallScreenMode(): boolean {
 
 export default class ScreenController extends Component {
   state: {
-    message: userFeedback | false
     screen: Screens
     smallScreenMode: boolean
   }
@@ -61,15 +55,10 @@ export default class ScreenController extends Component {
   constructor(public props: {}) {
     super(props)
     this.state = {
-      message: false,
       screen: Screens.Loading,
       smallScreenMode: isSmallScreenMode(),
     }
 
-    this.onError = this.onError.bind(this)
-    this.onSuccess = this.onSuccess.bind(this)
-    this.userFeedback = this.userFeedback.bind(this)
-    this.userFeedbackClick = this.userFeedbackClick.bind(this)
     this.changeScreen = this.changeScreen.bind(this)
     this.addAndSelectAccount = this.addAndSelectAccount.bind(this)
     this.selectAccount = this.selectAccount.bind(this)
@@ -79,7 +68,6 @@ export default class ScreenController extends Component {
     this.onExitWelcomeScreen = this.onExitWelcomeScreen.bind(this)
     this.updateSmallScreenMode = this.updateSmallScreenMode.bind(this)
 
-    window.__userFeedback = this.userFeedback.bind(this)
     window.__changeScreen = this.changeScreen.bind(this)
     window.__selectAccount = this.selectAccount.bind(this)
     window.__screen = this.state.screen
@@ -173,6 +161,10 @@ export default class ScreenController extends Component {
       return
     }
 
+    // All dialogs should be closed when switching accounts
+    // as long as we do not update account related state in dialogs
+    window.__closeAllDialogs?.()
+
     // Since we automatically invalidate `chatId` when `accountId` changes
     // in `ChatContext`, one might think that it's not necessary
     // to explicitly `unselectChat()` here.
@@ -241,28 +233,10 @@ export default class ScreenController extends Component {
     this.changeScreen(Screens.NoAccountSelected)
   }
 
-  userFeedback(message: userFeedback | false, clickToClose = false) {
-    if (message !== false && this.state.message === message) return // one at a time, cowgirl
-    this.setState({ message })
-    if (!clickToClose && message && message.type !== 'error') {
-      window.setTimeout(() => {
-        this.userFeedback(false)
-      }, 3000)
-    }
-  }
-
-  userFeedbackClick() {
-    this.userFeedback(false)
-  }
-
   changeScreen(screen: Screens) {
     log.debug('Changing screen to:', screen)
     this.setState({ screen })
     window.__screen = screen
-    if (Screens.Welcome) {
-      // remove user feedback error message - https://github.com/deltachat/deltachat-desktop/issues/2261
-      this.userFeedback(false)
-    }
   }
 
   updateSmallScreenMode() {
@@ -273,8 +247,6 @@ export default class ScreenController extends Component {
   }
 
   componentDidMount() {
-    BackendRemote.on('Error', this.onError)
-
     runtime.onResumeFromSleep = throttle(() => {
       log.info('onResumeFromSleep')
       // update timestamps
@@ -291,23 +263,7 @@ export default class ScreenController extends Component {
   }
 
   componentWillUnmount() {
-    BackendRemote.off('Error', this.onError)
-
     window.removeEventListener('resize', this.updateSmallScreenMode)
-  }
-
-  onError(accountId: number, { msg }: DcEventType<'Error'>) {
-    if (
-      this.selectedAccountId !== accountId ||
-      this.state.screen === Screens.Welcome
-    ) {
-      return
-    }
-    this.userFeedback({ type: 'error', text: msg })
-  }
-
-  onSuccess(_event: any, text: string) {
-    this.userFeedback({ type: 'success', text })
   }
 
   renderScreen(key: React.Key | null | undefined) {
@@ -358,17 +314,8 @@ export default class ScreenController extends Component {
   render() {
     return (
       <div data-testid={`selected-account:${this.selectedAccountId}`}>
-        {this.state.message && (
-          <div
-            onClick={this.userFeedbackClick}
-            className={`user-feedback ${this.state.message.type}`}
-          >
-            <p>{this.state.message.text}</p>
-          </div>
-        )}
         <ScreenContext.Provider
           value={{
-            userFeedback: this.userFeedback,
             changeScreen: this.changeScreen,
             screen: this.state.screen,
             smallScreenMode: this.state.smallScreenMode,
@@ -386,28 +333,30 @@ export default class ScreenController extends Component {
                 inside of `DialogContextProvider`. */}
                 <MediaPlayerMutexProvider>
                   <NextVoiceMessagePlayerProvider>
-                    <DialogContextProvider>
-                      <RuntimeAdapter accountId={this.selectedAccountId} />
-                      <KeybindingsContextProvider>
-                        <div className='main-container-container'>
-                          {this.state.smallScreenMode &&
-                            runtime.getRuntimeInfo().isMac && (
-                              <SmallScreenModeMacOSTitleBar />
-                            )}
-                          <div className='main-container'>
-                            <AccountListSidebar
-                              selectedAccountId={this.selectedAccountId}
-                              onAddAccount={this.addAndSelectAccount}
-                              onSelectAccount={this.selectAccount.bind(this)}
-                              openAccountDeletionScreen={this.openAccountDeletionScreen.bind(
-                                this
+                    <ToastContextProvider>
+                      <DialogContextProvider>
+                        <RuntimeAdapter accountId={this.selectedAccountId} />
+                        <KeybindingsContextProvider>
+                          <div className='main-container-container'>
+                            {this.state.smallScreenMode &&
+                              runtime.getRuntimeInfo().isMac && (
+                                <SmallScreenModeMacOSTitleBar />
                               )}
-                            />
-                            {this.renderScreen(this.selectedAccountId)}
+                            <div className='main-container'>
+                              <AccountListSidebar
+                                selectedAccountId={this.selectedAccountId}
+                                onAddAccount={this.addAndSelectAccount}
+                                onSelectAccount={this.selectAccount.bind(this)}
+                                openAccountDeletionScreen={this.openAccountDeletionScreen.bind(
+                                  this
+                                )}
+                              />
+                              {this.renderScreen(this.selectedAccountId)}
+                            </div>
                           </div>
-                        </div>
-                      </KeybindingsContextProvider>
-                    </DialogContextProvider>
+                        </KeybindingsContextProvider>
+                      </DialogContextProvider>
+                    </ToastContextProvider>
                   </NextVoiceMessagePlayerProvider>
                 </MediaPlayerMutexProvider>
               </ContextMenuProvider>

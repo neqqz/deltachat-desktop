@@ -1,10 +1,4 @@
-import React, {
-  useState,
-  useContext,
-  useRef,
-  useLayoutEffect,
-  useCallback,
-} from 'react'
+import React, { useState, useRef, useLayoutEffect, useCallback } from 'react'
 import classNames from 'classnames'
 
 import Dialog, {
@@ -19,7 +13,6 @@ import { QrReader, QrCodeScanRef } from '../QrReader'
 import { BackendRemote } from '../../backend-com'
 import { getLogger } from '@deltachat-desktop/shared/logger'
 
-import { ScreenContext } from '../../contexts/ScreenContext'
 import useContextMenu from '../../hooks/useContextMenu'
 import useProcessQr from '../../hooks/useProcessQr'
 import useTranslationFunction from '../../hooks/useTranslationFunction'
@@ -28,6 +21,7 @@ import { selectedAccountId } from '../../ScreenController'
 import useDialog from '../../hooks/dialog/useDialog'
 import type { DialogProps } from '../../contexts/DialogContext'
 import useAlertDialog from '../../hooks/dialog/useAlertDialog'
+import useToast from '../../hooks/useToast'
 import QrCodeCopyConfirmationDialog from './QrCodeCopyConfirmationDialog'
 import { useRpcFetch } from '../../hooks/useFetch'
 import { SCAN_CONTEXT_TYPE } from '../../hooks/useProcessQr'
@@ -111,9 +105,9 @@ export function QrCodeShowQrInner({
   description: string
   onClose?: todo
 }) {
-  const { userFeedback } = useContext(ScreenContext)
   const tx = useTranslationFunction()
   const { openDialog } = useDialog()
+  const showToast = useToast()
 
   const onCopy = () => {
     // Pop up confirmation dialog when clicked instead of copying the link directly
@@ -121,10 +115,7 @@ export function QrCodeShowQrInner({
       message: tx('share_invite_link_explain'),
       content: qrCode,
       copyCb: () => {
-        userFeedback({
-          type: 'success',
-          text: tx('copied_to_clipboard'),
-        })
+        showToast(tx('copied_to_clipboard'))
         onClose()
       },
       // no cancelCb; skip closing the window, maybe the user wants to use the QR code after all

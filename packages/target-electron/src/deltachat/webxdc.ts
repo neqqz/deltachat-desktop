@@ -23,7 +23,6 @@ import {
 } from '@deltachat-desktop/shared/shared-types.js'
 import { DesktopSettings } from '../desktop_settings.js'
 import { window as main_window, send } from '../windows/main.js'
-import { writeTempFileFromBase64 } from '../ipc.js'
 import {
   getAppMenu,
   getEditMenu,
@@ -386,10 +385,18 @@ export default class DCWebxdc {
       const appIconPromise = this.rpc
         .getWebxdcBlob(accountId, msg_id, webxdcInfo.icon)
         .then(blob => nativeImage.createFromBuffer(Buffer.from(blob, 'base64')))
+        // core refuses to load icons with unexpected dimensions or format,
+        // and the menu below waits for this promise
+        .catch(error => {
+          log.warn(`could not load icon of webxdc app ${appId}`, error)
+          return undefined
+        })
       let app_icon: Awaited<typeof appIconPromise> | undefined
-      appIconPromise.then(i => (app_icon = i))
       appIconPromise.then(i => {
-        webxdcWindow.setIcon(i)
+        app_icon = i
+        if (i) {
+          webxdcWindow.setIcon(i)
+        }
       })
 
       open_apps[appId] = {
@@ -517,11 +524,9 @@ export default class DCWebxdc {
       }
 
       if (!isMac) {
-        if (app_icon != undefined) {
-          webxdcWindow.setMenu(makeMenu())
-        } else {
-          appIconPromise.then(() => webxdcWindow.setMenu(makeMenu()))
-        }
+        // the menu shows the app icon, so it can only be built once the
+        // icon is loaded
+        appIconPromise.then(() => webxdcWindow.setMenu(makeMenu()))
       }
 
       webxdcWindow.on('focus', () => {
@@ -803,30 +808,6 @@ export default class DCWebxdc {
     ipcMain.handle('close-all-webxdc', () => {
       this._closeAll()
     })
-
-    ipcMain.handle(
-      'webxdc:custom:drag-file-out',
-      async (
-        event,
-        file_name: string,
-        base64_content: string,
-        icon_data_url?: string
-      ) => {
-        const path = await writeTempFileFromBase64(file_name, base64_content)
-        let icon: string | Electron.NativeImage = join(
-          htmlDistDir(),
-          'images/electron-file-drag-out.png'
-        )
-        if (icon_data_url) {
-          icon = nativeImage.createFromDataURL(icon_data_url)
-        }
-        // if xdc extract icon?
-        event.sender.startDrag({
-          file: path,
-          icon,
-        })
-      }
-    )
 
     ipcMain.handle(
       'webxdc:status-update',

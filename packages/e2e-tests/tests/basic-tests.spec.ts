@@ -480,7 +480,16 @@ test.describe('custom app picker URL', () => {
 
     await page.getByRole('button', { name: 'Attach' }).click()
     await page.getByRole('menuitem', { name: 'App' }).click()
-    await page.getByRole('button', { name: 'Poll' }).first().click()
+    // Narrow down the list first, and then pick the app by its name only:
+    // the name of a list entry also includes the description,
+    // and other apps describe themselves as poll apps as well.
+    const appPicker = page.locator('.styles_module_appPickerContainer')
+    await appPicker.getByPlaceholder('Search').fill('Poll')
+    await appPicker
+      .getByRole('button')
+      .filter({ has: page.getByText('Poll', { exact: true }) })
+      .first()
+      .click()
     await page.getByRole('button', { name: 'Add to Chat' }).click()
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect(page.locator(`.message`).last()).toContainText('Poll')
@@ -592,6 +601,7 @@ test('correct handling of changed profile displaynames', async () => {
   await page.getByTestId('edit-contact-name').click()
   await page.getByTestId('edit-contact-name-input').fill(contactNameGivenByMe)
   await page.getByTestId('ok').click()
+  await expect(page.locator('#view-profile-menu')).toBeFocused()
   await page.getByTestId('dialog-header-close').click()
   // profile shows the name I gave to the contact
   await expect(chatHeading).toContainText(contactNameGivenByMe)
@@ -606,6 +616,28 @@ test('correct handling of changed profile displaynames', async () => {
       .locator('.chat-list .chat-list-item')
       .filter({ hasText: contactNameGivenByMe })
   ).toBeVisible()
+})
+
+test('switching profile closes dialogs of the previous profile', async () => {
+  const userA = getUser(0, existingProfiles)
+  const userB = getUser(1, existingProfiles)
+  await switchToProfile(page, userA.id)
+  await selectChat(page, userB.name)
+
+  await page.getByRole('button', { name: 'Apps & Media' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+
+  // While a modal dialog is open, the account sidebar can't be clicked,
+  // so call window.__selectAccount with another accountId directly
+  await page.evaluate(
+    accountId => (window as any).__selectAccount(Number(accountId)),
+    userB.id
+  )
+  await expect(page.getByTestId(`selected-account:${userB.id}`)).toHaveCount(1)
+
+  // The dialog belongs to the previous profile, so it must not stay open,
+  // see https://github.com/deltachat/deltachat-desktop/issues/6602
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 test('delete profiles', async () => {

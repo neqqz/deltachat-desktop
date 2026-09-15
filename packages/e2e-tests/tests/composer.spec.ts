@@ -856,6 +856,30 @@ test.describe('edit message', () => {
 
     await page.keyboard.press('Escape')
   })
+  test('shows a toast when trying to save an empty edit', async () => {
+    await textarea.focus()
+    await page.keyboard.press('ArrowUp')
+    await expect(textareaEdit()).toHaveText('M 3')
+
+    await textareaEdit().fill('')
+    await page.keyboard.press('ControlOrMeta+Enter')
+
+    const toast = page.getByRole('status').getByText('Please enter a message.')
+    await expect(toast).toBeVisible()
+
+    // Trying again doesn't stack up a second toast with the same text.
+    await page.keyboard.press('ControlOrMeta+Enter')
+    await expect(toast).toHaveCount(1)
+
+    // We're still in the edit mode, with the input focused.
+    await expect(textareaEdit()).toBeFocused()
+    await expect(editMessageSection()).toContainText('Edit Message')
+
+    // The toast disappears on its own.
+    await expect(toast).not.toBeVisible({ timeout: 10_000 })
+
+    await page.keyboard.press('Escape')
+  })
 })
 
 test.describe('Emoji picker', () => {

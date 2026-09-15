@@ -1,4 +1,3 @@
-@use 'sass:map';
 @use 'variables';
 
 * {
@@ -130,36 +129,6 @@ code {
   padding: 0.4pt 3pt;
 }
 
-// toast for errors and success messages
-.user-feedback {
-  position: fixed;
-  top: 60px;
-  text-align: center;
-  width: 100%;
-  z-index: map.get(variables.$z-index, user-feedback);
-  pointer-events: none;
-
-  p {
-    display: inline-block;
-    text-align: center;
-    font-style: italic;
-    font-weight: bold;
-    padding: 10px 15px;
-    background-color: #696868;
-    border-radius: 50px;
-    color: white;
-    font-size: medium;
-    max-width: 90%;
-    pointer-events: all;
-  }
-  &.error p {
-    background-color: #b73a3a;
-  }
-  &.success p {
-    background-color: #415e6b;
-  }
-}
-
 .crash-screen {
   padding: 10px;
 
@@ -214,6 +183,11 @@ samp {
 // tauri: normalization fix, because user stylesheet of chrome sets audio elements to 300px
 audio {
   width: 300px;
+}
+.main-screen.small-screen {
+  audio {
+    width: 255px;
+  }
 }
 
 // used on electron and tauri runtime (it is handled by tauri, this class is for electron)
